@@ -26,23 +26,54 @@ type ResponseConfig struct {
 	// Rule is a standard Traefik routing rule, e.g. Host(`example.com`).
 	Rule string `json:"rule,omitempty"`
 
+	// Priority is the router priority. Falls back to Config.DefaultPriority
+	// when zero.
+	Priority int `json:"priority,omitempty"`
+
 	// Body is the literal response body. Mutually exclusive with File.
+	// Falls back to Config.DefaultBody/DefaultFile when both are empty.
 	Body string `json:"body,omitempty"`
 
 	// File is a path to a file whose contents are used as the response
 	// body. Mutually exclusive with Body.
 	File string `json:"file,omitempty"`
 
-	// Status is the HTTP status code to reply with. Defaults to 200.
+	// Status is the HTTP status code to reply with. Falls back to
+	// Config.DefaultStatus, and then to 200, when zero.
 	Status int `json:"status,omitempty"`
 
-	// Headers are extra response headers to set.
+	// Headers are extra response headers to set. Falls back to
+	// Config.DefaultHeaders when empty.
 	Headers map[string]string `json:"headers,omitempty"`
+
+	// Middlewares is a list of middleware names to apply to the router,
+	// before the request is short-circuited. Falls back to
+	// Config.DefaultMiddlewares when empty.
+	Middlewares []string `json:"middlewares,omitempty"`
 }
 
 // Config is the plugin configuration.
 type Config struct {
 	Responses []ResponseConfig `json:"responses,omitempty"`
+
+	// DefaultPriority is used for any response that doesn't set Priority.
+	DefaultPriority int `json:"defaultPriority,omitempty"`
+
+	// DefaultBody is used for any response that sets neither Body nor File.
+	DefaultBody string `json:"defaultBody,omitempty"`
+
+	// DefaultFile is used for any response that sets neither Body nor File.
+	DefaultFile string `json:"defaultFile,omitempty"`
+
+	// DefaultStatus is used for any response that doesn't set Status.
+	DefaultStatus int `json:"defaultStatus,omitempty"`
+
+	// DefaultHeaders is used for any response that doesn't set Headers.
+	DefaultHeaders map[string]string `json:"defaultHeaders,omitempty"`
+
+	// DefaultMiddlewares is used for any response that doesn't set
+	// Middlewares.
+	DefaultMiddlewares []string `json:"defaultMiddlewares,omitempty"`
 }
 
 // CreateConfig creates the default plugin configuration.
@@ -54,14 +85,14 @@ func CreateConfig() *Config {
 //
 // Traefik plugins can only be of a single type (either "provider" or
 // "middleware"), so this plugin cannot register its own plugin middleware
-// to perform the short-circuit inline. Instead, it runs a tiny HTTP server
-// local to the Traefik process (bound to 127.0.0.1) that serves the
-// configured static responses, and it generates dynamic configuration that
-// routes matching requests to it. A lightweight built-in "headers"
-// middleware is used to tag each request with the index of the response
-// configuration it matched, so the embedded server knows what to serve.
-// From the outside, the effect is the same as a short-circuiting
-// middleware: the real backend is never contacted.
+// to perform the short-circuit inline. Instead, it runs a single tiny HTTP
+// server local to the Traefik process (bound to 127.0.0.1) that knows how
+// to render every configured response, and it generates dynamic
+// configuration that routes matching requests to it. A lightweight
+// built-in (non-plugin) "headers" middleware is used to tag each request
+// with the index of the response configuration it matched, so the embedded
+// server knows what to serve. From the outside, the effect is the same as
+// a short-circuiting middleware: the real backend is never contacted.
 type Provider struct {
 	name      string
 	responses []ResponseConfig
@@ -73,10 +104,42 @@ type Provider struct {
 
 // New creates a new Provider plugin.
 func New(_ context.Context, config *Config, name string) (*Provider, error) {
+	responses := make([]ResponseConfig, 0, len(config.Responses))
+	for _, r := range config.Responses {
+		responses = append(responses, applyDefaults(r, config))
+	}
+
 	return &Provider{
 		name:      name,
-		responses: config.Responses,
+		responses: responses,
 	}, nil
+}
+
+// applyDefaults fills in the fields of a response that weren't set, using
+// the plugin-wide defaults.
+func applyDefaults(r ResponseConfig, config *Config) ResponseConfig {
+	if r.Priority == 0 {
+		r.Priority = config.DefaultPriority
+	}
+
+	if r.Body == "" && r.File == "" {
+		r.Body = config.DefaultBody
+		r.File = config.DefaultFile
+	}
+
+	if r.Status == 0 {
+		r.Status = config.DefaultStatus
+	}
+
+	if len(r.Headers) == 0 {
+		r.Headers = config.DefaultHeaders
+	}
+
+	if len(r.Middlewares) == 0 {
+		r.Middlewares = config.DefaultMiddlewares
+	}
+
+	return r
 }
 
 // Init the provider.
@@ -110,6 +173,7 @@ func (p *Provider) Provide(cfgChan chan<- json.Marshaler) error {
 
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
+		cancel()
 		return fmt.Errorf("failed to start internal listener: %w", err)
 	}
 	p.listener = listener
@@ -235,10 +299,18 @@ func (p *Provider) generateConfiguration() *dynamic.Configuration {
 			},
 		}
 
+		// The user-configured middlewares run first (e.g. auth), and the
+		// tagging middleware runs last, right before the request reaches
+		// the embedded server.
+		middlewares := make([]string, 0, len(resp.Middlewares)+1)
+		middlewares = append(middlewares, resp.Middlewares...)
+		middlewares = append(middlewares, middlewareName)
+
 		configuration.HTTP.Routers[routerName] = &dynamic.Router{
 			Rule:        resp.Rule,
+			Priority:    resp.Priority,
 			Service:     serviceName,
-			Middlewares: []string{middlewareName},
+			Middlewares: middlewares,
 		}
 	}
 

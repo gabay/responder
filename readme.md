@@ -28,31 +28,44 @@ experimental:
 providers:
   plugin:
     static-response-provider:
+      defaultStatus: 200
+      defaultHeaders:
+        content-type: text/plain
       responses:
         - rule: Host(`example.com`)
           body: 'OK'
           status: 200
+          priority: 10
           headers:
             content-type: text/plain
+          middlewares:
+            - my-middleware@file
         - rule: Host(`another.example.com`)
           file: static-response.txt
-          status: 200
 ```
 
 ### Configuration reference
 
 Each entry under `responses` supports:
 
-| Field     | Required | Description                                                                 |
-|-----------|----------|-------------------------------------------------------------------------------|
-| `rule`    | yes      | A standard Traefik routing rule, e.g. `` Host(`example.com`) ``.              |
-| `body`    | no       | The literal response body. Mutually exclusive with `file`.                    |
-| `file`    | no       | Path to a file on disk whose contents are used as the response body.          |
-| `status`  | no       | HTTP status code to return. Defaults to `200`.                                |
-| `headers` | no       | Map of extra response headers to set.                                         |
+| Field         | Required | Description                                                                    |
+|---------------|----------|----------------------------------------------------------------------------------|
+| `rule`        | yes      | A standard Traefik routing rule, e.g. `` Host(`example.com`) ``.                 |
+| `priority`    | no       | Router priority. Falls back to `defaultPriority` when unset.                    |
+| `body`        | no       | The literal response body. Mutually exclusive with `file`. Falls back to `defaultBody`/`defaultFile` when neither is set. |
+| `file`        | no       | Path to a file on disk whose contents are used as the response body.            |
+| `status`      | no       | HTTP status code to return. Falls back to `defaultStatus`, then to `200`.        |
+| `headers`     | no       | Map of extra response headers to set. Falls back to `defaultHeaders` when unset. |
+| `middlewares` | no       | List of middleware names (e.g. `my-middleware@file`) to apply to the router. Falls back to `defaultMiddlewares` when unset. |
 
 Exactly one of `body` or `file` may be set for a given response (both may be
 omitted for an empty body).
+
+At the top level of the plugin configuration, the following `default*` fields
+are used as fallbacks for any response that doesn't set the corresponding
+field: `defaultPriority`, `defaultBody`, `defaultFile`, `defaultStatus`,
+`defaultHeaders`, `defaultMiddlewares`. Each response falls back to these
+wholesale (no merging) whenever its own field is unset/empty.
 
 ### Local Mode
 
@@ -114,12 +127,17 @@ plugin loader does not support (the plugin type is fixed by the single
 To still get short-circuiting behavior out of a single, provider-only plugin,
 this plugin:
 
-1. Starts a tiny HTTP server bound to `127.0.0.1` (loopback only), local to the
-   Traefik process, that knows how to render each configured response.
+1. Starts a single tiny HTTP server bound to `127.0.0.1` (loopback only),
+   local to the Traefik process, that knows how to render every configured
+   response.
 2. Generates, for every configured response, a Traefik `router` (using your
-   `rule`), a built-in (non-plugin) `headers` middleware that tags the request
-   with which response it matched, and points the router at a single internal
-   `service` that targets the embedded server from step 1.
+   `rule`, `priority`, and `middlewares`), a built-in (non-plugin) `headers`
+   middleware that tags the request with which response it matched (via an
+   internal-only `X-Static-Response-Id` header that never leaves the
+   Traefik process), and a shared `service` that targets the embedded
+   server from step 1. Any `middlewares` you configure run first (e.g.
+   auth), followed by the tagging middleware right before the request
+   reaches the embedded server.
 
 Because the embedded server never talks to your real backends, the effect is
 functionally the same as a short-circuiting middleware — matching requests

@@ -7,9 +7,15 @@ import: github.com/gabay/static-response-provider
 summary: 'Serve static HTTP responses (body or file) for requests matching a Traefik rule'
 
 testData:
+  defaultStatus: 200
+  defaultHeaders:
+    Content-Type: text/plain
   responses:
     - rule: "Host(`example.com`)"
       body: "OK"
       status: 200
+      priority: 10
       headers:
         Content-Type: text/plain
+      middlewares:
+        - my-middleware@file

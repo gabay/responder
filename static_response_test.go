@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 
 	staticresponseprovider "github.com/gabay/static-response-provider"
@@ -55,19 +56,10 @@ func TestInit_RejectsBodyAndFileTogether(t *testing.T) {
 	}
 }
 
-func TestProvide_GeneratesRouterAndService(t *testing.T) {
-	provider := newProvider(t, &staticresponseprovider.Config{
-		Responses: []staticresponseprovider.ResponseConfig{
-			{
-				Rule:   "Host(`example.com`)",
-				Body:   "OK",
-				Status: 200,
-				Headers: map[string]string{
-					"Content-Type": "text/plain",
-				},
-			},
-		},
-	})
+// provideConfig starts the provider and returns its generated dynamic
+// configuration as a generic map, along with a cleanup func that stops it.
+func provideConfig(t *testing.T, provider *staticresponseprovider.Provider) map[string]any {
+	t.Helper()
 
 	if err := provider.Init(); err != nil {
 		t.Fatal(err)
@@ -97,24 +89,152 @@ func TestProvide_GeneratesRouterAndService(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	httpCfg, ok := raw["http"].(map[string]any)
-	if !ok {
-		t.Fatalf("expected http configuration, got %v", raw)
+	return raw
+}
+
+func TestProvide_GeneratesOneServiceAndOneRouterMiddlewarePerResponse(t *testing.T) {
+	provider := newProvider(t, &staticresponseprovider.Config{
+		Responses: []staticresponseprovider.ResponseConfig{
+			{Rule: "Host(`a.example.com`)", Body: "A"},
+			{Rule: "Host(`b.example.com`)", Body: "B"},
+		},
+	})
+
+	raw := provideConfig(t, provider)
+
+	httpCfg := raw["http"].(map[string]any)
+
+	routers := httpCfg["routers"].(map[string]any)
+	if len(routers) != 2 {
+		t.Fatalf("expected 2 routers, got %v", routers)
 	}
 
-	routers, ok := httpCfg["routers"].(map[string]any)
-	if !ok || len(routers) != 1 {
-		t.Fatalf("expected exactly one router, got %v", httpCfg["routers"])
+	// A single shared service/server is used for every response.
+	services := httpCfg["services"].(map[string]any)
+	if len(services) != 1 {
+		t.Fatalf("expected exactly 1 shared service, got %v", services)
 	}
 
-	services, ok := httpCfg["services"].(map[string]any)
-	if !ok || len(services) != 1 {
-		t.Fatalf("expected exactly one service, got %v", httpCfg["services"])
+	// One tagging middleware is generated per response.
+	middlewares := httpCfg["middlewares"].(map[string]any)
+	if len(middlewares) != 2 {
+		t.Fatalf("expected 2 middlewares, got %v", middlewares)
+	}
+}
+
+func TestProvide_RouterUsesPriorityAndMiddlewares(t *testing.T) {
+	provider := newProvider(t, &staticresponseprovider.Config{
+		Responses: []staticresponseprovider.ResponseConfig{
+			{
+				Rule:        "Host(`example.com`)",
+				Body:        "OK",
+				Priority:    42,
+				Middlewares: []string{"my-middleware@file"},
+			},
+		},
+	})
+
+	raw := provideConfig(t, provider)
+
+	httpCfg := raw["http"].(map[string]any)
+	routers := httpCfg["routers"].(map[string]any)
+
+	var router map[string]any
+	for _, r := range routers {
+		router = r.(map[string]any)
 	}
 
-	middlewares, ok := httpCfg["middlewares"].(map[string]any)
-	if !ok || len(middlewares) != 1 {
-		t.Fatalf("expected exactly one middleware, got %v", httpCfg["middlewares"])
+	if router["priority"].(float64) != 42 {
+		t.Fatalf("expected priority 42, got %v", router["priority"])
+	}
+
+	middlewares := router["middlewares"].([]any)
+	if len(middlewares) != 2 {
+		t.Fatalf("expected 2 middlewares (user + tag), got %v", middlewares)
+	}
+
+	if middlewares[0].(string) != "my-middleware@file" {
+		t.Fatalf("expected user middleware to run first, got %v", middlewares)
+	}
+}
+
+func TestProvide_AppliesDefaults(t *testing.T) {
+	provider := newProvider(t, &staticresponseprovider.Config{
+		DefaultPriority:    7,
+		DefaultBody:        "default body",
+		DefaultStatus:      201,
+		DefaultHeaders:     map[string]string{"X-Default": "yes"},
+		DefaultMiddlewares: []string{"default-middleware@file"},
+		Responses: []staticresponseprovider.ResponseConfig{
+			{Rule: "Host(`example.com`)"},
+		},
+	})
+
+	raw := provideConfig(t, provider)
+
+	resp := doRequest(t, raw, 0)
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 201 {
+		t.Fatalf("expected status 201, got %d", resp.StatusCode)
+	}
+
+	if got := resp.Header.Get("X-Default"); got != "yes" {
+		t.Fatalf("expected header X-Default=yes, got %q", got)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if string(body) != "default body" {
+		t.Fatalf("expected body %q, got %q", "default body", string(body))
+	}
+
+	httpCfg := raw["http"].(map[string]any)
+	routers := httpCfg["routers"].(map[string]any)
+
+	var router map[string]any
+	for _, r := range routers {
+		router = r.(map[string]any)
+	}
+
+	if router["priority"].(float64) != 7 {
+		t.Fatalf("expected default priority 7, got %v", router["priority"])
+	}
+
+	middlewares := router["middlewares"].([]any)
+	if len(middlewares) != 2 || middlewares[0].(string) != "default-middleware@file" {
+		t.Fatalf("expected default middlewares, got %v", middlewares)
+	}
+}
+
+func TestProvide_ResponseOverridesDefaults(t *testing.T) {
+	provider := newProvider(t, &staticresponseprovider.Config{
+		DefaultBody:   "default body",
+		DefaultStatus: 201,
+		Responses: []staticresponseprovider.ResponseConfig{
+			{Rule: "Host(`example.com`)", Body: "overridden body", Status: 202},
+		},
+	})
+
+	raw := provideConfig(t, provider)
+
+	resp := doRequest(t, raw, 0)
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 202 {
+		t.Fatalf("expected status 202, got %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if string(body) != "overridden body" {
+		t.Fatalf("expected body %q, got %q", "overridden body", string(body))
 	}
 }
 
@@ -132,46 +252,9 @@ func TestServeResponse_Body(t *testing.T) {
 		},
 	})
 
-	if err := provider.Init(); err != nil {
-		t.Fatal(err)
-	}
+	raw := provideConfig(t, provider)
 
-	t.Cleanup(func() {
-		if err := provider.Stop(); err != nil {
-			t.Fatal(err)
-		}
-	})
-
-	cfgChan := make(chan json.Marshaler)
-
-	if err := provider.Provide(cfgChan); err != nil {
-		t.Fatal(err)
-	}
-
-	payload := <-cfgChan
-
-	data, err := json.Marshal(payload)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	var raw map[string]any
-	if err := json.Unmarshal(data, &raw); err != nil {
-		t.Fatal(err)
-	}
-
-	serviceURL := extractServiceURL(t, raw)
-
-	req, err := http.NewRequest(http.MethodGet, serviceURL, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	req.Header.Set("X-Static-Response-Id", "0")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
+	resp := doRequest(t, raw, 0)
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 201 {
@@ -209,46 +292,9 @@ func TestServeResponse_File(t *testing.T) {
 		},
 	})
 
-	if err := provider.Init(); err != nil {
-		t.Fatal(err)
-	}
+	raw := provideConfig(t, provider)
 
-	t.Cleanup(func() {
-		if err := provider.Stop(); err != nil {
-			t.Fatal(err)
-		}
-	})
-
-	cfgChan := make(chan json.Marshaler)
-
-	if err := provider.Provide(cfgChan); err != nil {
-		t.Fatal(err)
-	}
-
-	payload := <-cfgChan
-
-	data, err := json.Marshal(payload)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	var raw map[string]any
-	if err := json.Unmarshal(data, &raw); err != nil {
-		t.Fatal(err)
-	}
-
-	serviceURL := extractServiceURL(t, raw)
-
-	req, err := http.NewRequest(http.MethodGet, serviceURL, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	req.Header.Set("X-Static-Response-Id", "0")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
+	resp := doRequest(t, raw, 0)
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
@@ -265,22 +311,65 @@ func TestServeResponse_File(t *testing.T) {
 	}
 }
 
-func extractServiceURL(t *testing.T, raw map[string]any) string {
+func TestServeResponse_MultipleResponsesShareOneServer(t *testing.T) {
+	provider := newProvider(t, &staticresponseprovider.Config{
+		Responses: []staticresponseprovider.ResponseConfig{
+			{Rule: "Host(`a.example.com`)", Body: "A", Status: 200},
+			{Rule: "Host(`b.example.com`)", Body: "B", Status: 200},
+		},
+	})
+
+	raw := provideConfig(t, provider)
+
+	httpCfg := raw["http"].(map[string]any)
+	services := httpCfg["services"].(map[string]any)
+	if len(services) != 1 {
+		t.Fatalf("expected exactly 1 shared service, got %v", services)
+	}
+
+	respA := doRequest(t, raw, 0)
+	defer respA.Body.Close()
+	bodyA, _ := io.ReadAll(respA.Body)
+	if string(bodyA) != "A" {
+		t.Fatalf("expected body %q, got %q", "A", string(bodyA))
+	}
+
+	respB := doRequest(t, raw, 1)
+	defer respB.Body.Close()
+	bodyB, _ := io.ReadAll(respB.Body)
+	if string(bodyB) != "B" {
+		t.Fatalf("expected body %q, got %q", "B", string(bodyB))
+	}
+}
+
+// doRequest sends a request directly to the shared embedded server, tagging
+// it with X-Static-Response-Id, exactly like the generated "headers"
+// middleware would.
+func doRequest(t *testing.T, raw map[string]any, responseIndex int) *http.Response {
 	t.Helper()
 
 	httpCfg := raw["http"].(map[string]any)
 	services := httpCfg["services"].(map[string]any)
 
+	var serviceURL string
 	for _, svc := range services {
 		svcMap := svc.(map[string]any)
 		lb := svcMap["loadBalancer"].(map[string]any)
 		servers := lb["servers"].([]any)
 		server := servers[0].(map[string]any)
-
-		return server["url"].(string)
+		serviceURL = server["url"].(string)
 	}
 
-	t.Fatal("no service found")
+	req, err := http.NewRequest(http.MethodGet, serviceURL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("X-Static-Response-Id", strconv.Itoa(responseIndex))
 
-	return ""
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return resp
 }
