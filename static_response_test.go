@@ -13,6 +13,13 @@ import (
 	staticresponseprovider "github.com/gabay/static-response-provider"
 )
 
+const (
+	testBodyOK         = "OK"
+	testRuleExample    = "Host(`example.com`)"
+	testDefaultBody    = "default body"
+	testDefaultHeaderY = "yes"
+)
+
 func newProvider(t *testing.T, config *staticresponseprovider.Config) *staticresponseprovider.Provider {
 	t.Helper()
 
@@ -35,7 +42,7 @@ func TestInit_RequiresAtLeastOneResponse(t *testing.T) {
 func TestInit_RequiresRule(t *testing.T) {
 	provider := newProvider(t, &staticresponseprovider.Config{
 		Responses: []staticresponseprovider.ResponseConfig{
-			{Body: "OK"},
+			{Body: testBodyOK},
 		},
 	})
 
@@ -47,7 +54,7 @@ func TestInit_RequiresRule(t *testing.T) {
 func TestInit_RejectsBodyAndFileTogether(t *testing.T) {
 	provider := newProvider(t, &staticresponseprovider.Config{
 		Responses: []staticresponseprovider.ResponseConfig{
-			{Rule: "Host(`example.com`)", Body: "OK", File: "response.txt"},
+			{Rule: testRuleExample, Body: testBodyOK, File: "response.txt"},
 		},
 	})
 
@@ -126,8 +133,8 @@ func TestProvide_RouterUsesPriorityAndMiddlewares(t *testing.T) {
 	provider := newProvider(t, &staticresponseprovider.Config{
 		Responses: []staticresponseprovider.ResponseConfig{
 			{
-				Rule:        "Host(`example.com`)",
-				Body:        "OK",
+				Rule:        testRuleExample,
+				Body:        testBodyOK,
 				Priority:    42,
 				Middlewares: []string{"my-middleware@file"},
 			},
@@ -161,12 +168,12 @@ func TestProvide_RouterUsesPriorityAndMiddlewares(t *testing.T) {
 func TestProvide_AppliesDefaults(t *testing.T) {
 	provider := newProvider(t, &staticresponseprovider.Config{
 		DefaultPriority:    7,
-		DefaultBody:        "default body",
+		DefaultBody:        testDefaultBody,
 		DefaultStatus:      201,
-		DefaultHeaders:     map[string]string{"X-Default": "yes"},
+		DefaultHeaders:     map[string]string{"X-Default": testDefaultHeaderY},
 		DefaultMiddlewares: []string{"default-middleware@file"},
 		Responses: []staticresponseprovider.ResponseConfig{
-			{Rule: "Host(`example.com`)"},
+			{Rule: testRuleExample},
 		},
 	})
 
@@ -179,7 +186,7 @@ func TestProvide_AppliesDefaults(t *testing.T) {
 		t.Fatalf("expected status 201, got %d", resp.StatusCode)
 	}
 
-	if got := resp.Header.Get("X-Default"); got != "yes" {
+	if got := resp.Header.Get("X-Default"); got != testDefaultHeaderY {
 		t.Fatalf("expected header X-Default=yes, got %q", got)
 	}
 
@@ -188,8 +195,8 @@ func TestProvide_AppliesDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if string(body) != "default body" {
-		t.Fatalf("expected body %q, got %q", "default body", string(body))
+	if string(body) != testDefaultBody {
+		t.Fatalf("expected body %q, got %q", testDefaultBody, string(body))
 	}
 
 	httpCfg := raw["http"].(map[string]any)
@@ -212,10 +219,10 @@ func TestProvide_AppliesDefaults(t *testing.T) {
 
 func TestProvide_ResponseOverridesDefaults(t *testing.T) {
 	provider := newProvider(t, &staticresponseprovider.Config{
-		DefaultBody:   "default body",
+		DefaultBody:   testDefaultBody,
 		DefaultStatus: 201,
 		Responses: []staticresponseprovider.ResponseConfig{
-			{Rule: "Host(`example.com`)", Body: "overridden body", Status: 202},
+			{Rule: testRuleExample, Body: "overridden body", Status: 202},
 		},
 	})
 
@@ -242,7 +249,7 @@ func TestServeResponse_Body(t *testing.T) {
 	provider := newProvider(t, &staticresponseprovider.Config{
 		Responses: []staticresponseprovider.ResponseConfig{
 			{
-				Rule:   "Host(`example.com`)",
+				Rule:   testRuleExample,
 				Body:   "hello from body",
 				Status: 201,
 				Headers: map[string]string{
@@ -279,14 +286,14 @@ func TestServeResponse_File(t *testing.T) {
 	dir := t.TempDir()
 	filePath := filepath.Join(dir, "response.txt")
 
-	if err := os.WriteFile(filePath, []byte("hello from file"), 0o644); err != nil {
+	if err := os.WriteFile(filePath, []byte("hello from file"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
 	provider := newProvider(t, &staticresponseprovider.Config{
 		Responses: []staticresponseprovider.ResponseConfig{
 			{
-				Rule: "Host(`example.com`)",
+				Rule: testRuleExample,
 				File: filePath,
 			},
 		},

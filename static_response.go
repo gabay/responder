@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/traefik/genconf/dynamic"
 	"github.com/traefik/genconf/dynamic/tls"
@@ -20,6 +21,10 @@ import (
 // HTTP server (see below) which configured response it must serve for a
 // given request. It never leaves the Traefik process.
 const responseIDHeader = "X-Static-Response-Id"
+
+// readHeaderTimeout bounds how long the embedded server waits to read
+// request headers, mitigating Slowloris-style attacks.
+const readHeaderTimeout = 5 * time.Second
 
 // ResponseConfig describes a single static response bound to a routing rule.
 type ResponseConfig struct {
@@ -180,18 +185,18 @@ func (p *Provider) Provide(cfgChan chan<- json.Marshaler) error {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", p.serveResponse)
-	p.server = &http.Server{Handler: mux}
+	p.server = &http.Server{Handler: mux, ReadHeaderTimeout: readHeaderTimeout}
 
 	go func() {
 		if serveErr := p.server.Serve(listener); serveErr != nil && serveErr != http.ErrServerClosed {
-			os.Stderr.WriteString(fmt.Sprintf("static-response-provider: server error: %v\n", serveErr))
+			fmt.Fprintf(os.Stderr, "static-response-provider: server error: %v\n", serveErr)
 		}
 	}()
 
 	go func() {
 		defer func() {
 			if rec := recover(); rec != nil {
-				os.Stderr.WriteString(fmt.Sprintf("static-response-provider: panic: %v\n", rec))
+				fmt.Fprintf(os.Stderr, "static-response-provider: panic: %v\n", rec)
 			}
 		}()
 
@@ -233,7 +238,7 @@ func (p *Provider) serveResponse(w http.ResponseWriter, r *http.Request) {
 	if resp.File != "" {
 		content, readErr := os.ReadFile(resp.File)
 		if readErr != nil {
-			os.Stderr.WriteString(fmt.Sprintf("static-response-provider: failed to read file %q: %v\n", resp.File, readErr))
+			fmt.Fprintf(os.Stderr, "static-response-provider: failed to read file %q: %v\n", resp.File, readErr)
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
