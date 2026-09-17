@@ -1,4 +1,4 @@
-module github.com/traefik/pluginproviderdemo
+module github.com/gabay/static-response-provider
 
 go 1.19
 

@@ -1,10 +1,15 @@
-displayName: Provider Plugin Demo
+displayName: Static Response Provider
 type: provider
 iconPath: .assets/icon.png
 
-import: github.com/traefik/pluginproviderdemo
+import: github.com/gabay/static-response-provider
 
-summary: '[Demo] Simple Provider Plugin'
+summary: 'Serve static HTTP responses (body or file) for requests matching a Traefik rule'
 
 testData:
-  pollInterval: 5s
+  responses:
+    - rule: "Host(`example.com`)"
+      body: "OK"
+      status: 200
+      headers:
+        Content-Type: text/plain
