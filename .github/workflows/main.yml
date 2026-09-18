@@ -67,7 +67,7 @@ jobs:
               run: make
 
             # TODO: make it work
-            # current error: Error: test: static_response.go:16:2: import "github.com/traefik/genconf/dynamic" error: unable to find source related to: "github.com/traefik/genconf/dynamic"
+            # current error: Error: test: static_response_provider.go:16:2: import "github.com/traefik/genconf/dynamic" error: unable to find source related to: "github.com/traefik/genconf/dynamic"
             # - name: Run tests with Yaegi
             #   run: make yaegi_test
             #   env:

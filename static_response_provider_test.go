@@ -1,4 +1,4 @@
-package staticresponseprovider_test
+package static_response_provider_test
 
 import (
 	"context"

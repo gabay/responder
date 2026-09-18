@@ -20,42 +20,42 @@ For a plugin to be active for a given Traefik instance, it must be declared in t
 # Static configuration
 
 experimental:
-  plugins:
-    static-response-provider:
-      moduleName: github.com/gabay/static-response-provider
-      version: v0.1.0
+    plugins:
+        static-response-provider:
+            moduleName: github.com/gabay/static-response-provider
+            version: v0.1.0
 
 providers:
-  plugin:
-    static-response-provider:
-      defaultStatus: 200
-      defaultHeaders:
-        content-type: text/plain
-      responses:
-        - rule: Host(`example.com`)
-          body: 'OK'
-          status: 200
-          priority: 10
-          headers:
-            content-type: text/plain
-          middlewares:
-            - my-middleware@file
-        - rule: Host(`another.example.com`)
-          file: static-response.txt
+    plugin:
+        static-response-provider:
+            defaultStatus: 200
+            defaultHeaders:
+                content-type: text/plain
+            responses:
+                - rule: Host(`example.com`)
+                  body: "OK"
+                  status: 200
+                  priority: 10
+                  headers:
+                      content-type: text/plain
+                  middlewares:
+                      - my-middleware@file
+                - rule: Host(`another.example.com`)
+                  file: static-response.txt
 ```
 
 ### Configuration reference
 
 Each entry under `responses` supports:
 
-| Field         | Required | Description                                                                    |
-|---------------|----------|----------------------------------------------------------------------------------|
-| `rule`        | yes      | A standard Traefik routing rule, e.g. `` Host(`example.com`) ``.                 |
-| `priority`    | no       | Router priority. Falls back to `defaultPriority` when unset.                    |
-| `body`        | no       | The literal response body. Mutually exclusive with `file`. Falls back to `defaultBody`/`defaultFile` when neither is set. |
-| `file`        | no       | Path to a file on disk whose contents are used as the response body.            |
-| `status`      | no       | HTTP status code to return. Falls back to `defaultStatus`, then to `200`.        |
-| `headers`     | no       | Map of extra response headers to set. Falls back to `defaultHeaders` when unset. |
+| Field         | Required | Description                                                                                                                 |
+| ------------- | -------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `rule`        | yes      | A standard Traefik routing rule, e.g. ``Host(`example.com`)``.                                                              |
+| `priority`    | no       | Router priority. Falls back to `defaultPriority` when unset.                                                                |
+| `body`        | no       | The literal response body. Mutually exclusive with `file`. Falls back to `defaultBody`/`defaultFile` when neither is set.   |
+| `file`        | no       | Path to a file on disk whose contents are used as the response body.                                                        |
+| `status`      | no       | HTTP status code to return. Falls back to `defaultStatus`, then to `200`.                                                   |
+| `headers`     | no       | Map of extra response headers to set. Falls back to `defaultHeaders` when unset.                                            |
 | `middlewares` | no       | List of middleware names (e.g. `my-middleware@file`) to apply to the router. Falls back to `defaultMiddlewares` when unset. |
 
 Exactly one of `body` or `file` may be set for a given response (both may be
@@ -80,8 +80,8 @@ The plugin must be placed in the `./plugins-local` directory, which should be in
         └── github.com
             └── gabay
                 └── static-response-provider
-                    ├── static_response.go
-                    ├── static_response_test.go
+                    ├── static_response_provider.go
+                    ├── static_response_provider_test.go
                     ├── go.mod
                     ├── go.sum
                     ├── LICENSE
@@ -95,23 +95,23 @@ The plugin must be placed in the `./plugins-local` directory, which should be in
 # Static configuration
 # Local mode
 entryPoints:
-  web:
-    address: :80
+    web:
+        address: :80
 
 log:
-  level: DEBUG
+    level: DEBUG
 
 experimental:
-  localPlugins:
-    static-response-provider:
-      moduleName: github.com/gabay/static-response-provider
+    localPlugins:
+        static-response-provider:
+            moduleName: github.com/gabay/static-response-provider
 
 providers:
-  plugin:
-    static-response-provider:
-      responses:
-        - rule: Host(`example.com`)
-          body: 'OK'
+    plugin:
+        static-response-provider:
+            responses:
+                - rule: Host(`example.com`)
+                  body: "OK"
 ```
 
 ## How it works
@@ -119,7 +119,7 @@ providers:
 Traefik plugins can only be of a single declared type: either `provider` or
 `middleware` (see the [manifest documentation](https://plugins.traefik.io/create)).
 A single plugin repository can therefore not register its own inline plugin
-*middleware* to perform the short-circuit — doing so would require the same
+_middleware_ to perform the short-circuit — doing so would require the same
 module to be loaded both as a `provider` and as a `middleware`, which Traefik's
 plugin loader does not support (the plugin type is fixed by the single
 `.traefik.yml` manifest of the module).

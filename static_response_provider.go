@@ -1,7 +1,7 @@
 // Package staticresponseprovider contains a provider plugin that serves
 // static HTTP responses (short-circuiting the request) based on Traefik
 // routing rules.
-package staticresponseprovider
+package static_response_provider
 
 import (
 	"context"
