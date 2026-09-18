@@ -1,6 +1,10 @@
-[![Build Status](https://github.com/gabay/static-response-provider/workflows/Main/badge.svg?branch=master)](https://github.com/gabay/static-response-provider/actions)
+[![Build Status](https://github.com/gabay/responder/workflows/Main/badge.svg)](https://github.com/gabay/responder/actions)
 
-# Static Response Provider
+<div align="center">
+  <img src="./.assets/icon.png" width="256" alt="Traefik Authentik Forward Plugin">
+</div>
+
+# Responder
 
 A [Traefik](https://traefik.io) **provider plugin** that lets you declare static HTTP
 responses directly in the Traefik static configuration. Any request matching a
@@ -21,27 +25,25 @@ For a plugin to be active for a given Traefik instance, it must be declared in t
 
 experimental:
     plugins:
-        static-response-provider:
-            moduleName: github.com/gabay/static-response-provider
-            version: v0.1.0
+        responder:
+            moduleName: github.com/gabay/responder
+            version: v0.2.0
 
 providers:
     plugin:
-        static-response-provider:
-            defaultStatus: 200
+        responder:
+            defaultStatus: 204
             defaultHeaders:
-                content-type: text/plain
+                Access-Control-Allow-Origin: "*"
             responses:
-                - rule: Host(`example.com`)
+                - rule: Host(`example.com`) && Path(`/heartbeat`)
                   body: "OK"
                   status: 200
                   priority: 10
-                  headers:
-                      content-type: text/plain
                   middlewares:
                       - my-middleware@file
                 - rule: Host(`another.example.com`)
-                  file: static-response.txt
+                  file: dynamic-response.txt
 ```
 
 ### Configuration reference
@@ -79,9 +81,9 @@ The plugin must be placed in the `./plugins-local` directory, which should be in
     └── src
         └── github.com
             └── gabay
-                └── static-response-provider
-                    ├── static_response_provider.go
-                    ├── static_response_provider_test.go
+                └── responder
+                    ├── responder.go
+                    ├── responder_test.go
                     ├── go.mod
                     ├── go.sum
                     ├── LICENSE
@@ -103,12 +105,12 @@ log:
 
 experimental:
     localPlugins:
-        static-response-provider:
-            moduleName: github.com/gabay/static-response-provider
+        responder:
+            moduleName: github.com/gabay/responder
 
 providers:
     plugin:
-        static-response-provider:
+        responder:
             responses:
                 - rule: Host(`example.com`)
                   body: "OK"
@@ -116,82 +118,14 @@ providers:
 
 ## How it works
 
-Traefik plugins can only be of a single declared type: either `provider` or
-`middleware` (see the [manifest documentation](https://plugins.traefik.io/create)).
-A single plugin repository can therefore not register its own inline plugin
-_middleware_ to perform the short-circuit — doing so would require the same
-module to be loaded both as a `provider` and as a `middleware`, which Traefik's
-plugin loader does not support (the plugin type is fixed by the single
-`.traefik.yml` manifest of the module).
-
-To still get short-circuiting behavior out of a single, provider-only plugin,
-this plugin:
-
 1. Starts a single tiny HTTP server bound to `127.0.0.1` (loopback only),
    local to the Traefik process, that knows how to render every configured
    response.
 2. Generates, for every configured response, a Traefik `router` (using your
    `rule`, `priority`, and `middlewares`), a built-in (non-plugin) `headers`
    middleware that tags the request with which response it matched (via an
-   internal-only `X-Static-Response-Id` header that never leaves the
+   internal-only `X-Responder-Id` header that never leaves the
    Traefik process), and a shared `service` that targets the embedded
    server from step 1. Any `middlewares` you configure run first (e.g.
    auth), followed by the tagging middleware right before the request
    reaches the embedded server.
-
-Because the embedded server never talks to your real backends, the effect is
-functionally the same as a short-circuiting middleware — matching requests
-never leave the Traefik process — while staying within the constraints of a
-single provider-type plugin.
-
-If you need this to be a "true" zero-hop middleware short-circuit (no local
-HTTP round trip at all), the alternative is to split this into two separate
-plugin repositories: one `type: middleware` plugin implementing
-`New(ctx, next, config, name) (http.Handler, error)` that writes the static
-response directly, and one `type: provider` plugin (or plain static/file
-provider configuration) that declares routers referencing that middleware via
-the `plugin` field of `dynamic.Middleware`. That requires publishing two
-plugins instead of one.
-
-## Defining a Plugin
-
-A provider plugin package must define the following exported Go objects:
-
-- A type `type Config struct { ... }`. The struct fields are arbitrary.
-- A function `func CreateConfig() *Config`.
-- A function `New(ctx context.Context, config *Config, name string) (*Provider, error)`.
-
-The provider must follow this interface:
-
-```go
-type PluginProvider interface {
-	Init() error
-	Provide(cfgChan chan<- json.Marshaler) error
-	Stop() error
-}
-```
-
-The Go objects used to build the dynamic configuration are in the following repository: https://github.com/traefik/genconf
-
-## Logs
-
-Currently, the only way to send logs to Traefik is to use `os.Stdout.WriteString("...")` or `os.Stderr.WriteString("...")`.
-
-## Plugins Catalog
-
-Traefik plugins are stored and hosted as public GitHub repositories.
-
-Once a day, the Plugins Catalog online service polls Github to find plugins and add them to its catalog.
-
-### Prerequisites
-
-To be recognized by Plugins Catalog, your repository must meet the following criteria:
-
-- The `traefik-plugin` topic must be set.
-- The `.traefik.yml` manifest must exist, and be filled with valid contents.
-
-### Tags and Dependencies
-
-Plugins Catalog gets your sources from a Go module proxy, so your plugins need to be versioned with a git tag.
-
-Last but not least, if your plugin has Go package dependencies, you need to vendor them and add them to your GitHub repository.

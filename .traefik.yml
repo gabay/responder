@@ -1,15 +1,13 @@
-displayName: Static Response Provider
+displayName: Responder
 type: provider
 iconPath: .assets/icon.png
 
-import: github.com/gabay/static-response-provider
+import: github.com/gabay/responder
 
-summary: 'Serve static HTTP responses (body or file) for requests matching a Traefik rule'
+summary: 'Serve HTTP requests directly in traefik'
 
 testData:
-  defaultStatus: 200
-  defaultHeaders:
-    Content-Type: text/plain
+  defaultStatus: 204
   responses:
     - rule: "Host(`example.com`)"
       body: "OK"
