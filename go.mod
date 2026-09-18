@@ -1,4 +1,4 @@
-module github.com/gabay/static-response-provider
+module github.com/gabay/responder
 
 go 1.22
 

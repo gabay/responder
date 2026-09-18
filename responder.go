@@ -1,7 +1,7 @@
-// Package staticresponseprovider contains a provider plugin that serves
+// Package responder contains a provider plugin that serves
 // static HTTP responses (short-circuiting the request) based on Traefik
 // routing rules.
-package static_response_provider
+package responder
 
 import (
 	"context"
@@ -20,7 +20,7 @@ import (
 // responseIDHeader is an internal-only header used to tell the embedded
 // HTTP server (see below) which configured response it must serve for a
 // given request. It never leaves the Traefik process.
-const responseIDHeader = "X-Static-Response-Id"
+const responseIDHeader = "X-Responder-Id"
 
 // readHeaderTimeout bounds how long the embedded server waits to read
 // request headers, mitigating Slowloris-style attacks.
@@ -86,18 +86,13 @@ func CreateConfig() *Config {
 	return &Config{}
 }
 
-// Provider is the static response provider plugin.
+// Provider is the heart of the responder plugin.
 //
-// Traefik plugins can only be of a single type (either "provider" or
-// "middleware"), so this plugin cannot register its own plugin middleware
-// to perform the short-circuit inline. Instead, it runs a single tiny HTTP
-// server local to the Traefik process (bound to 127.0.0.1) that knows how
-// to render every configured response, and it generates dynamic
+// This plugin runs a single tiny HTTP server local to the Traefik process (bound to 127.0.0.1) that
+// knows how to render every configured response, and it generates dynamic
 // configuration that routes matching requests to it. A lightweight
-// built-in (non-plugin) "headers" middleware is used to tag each request
-// with the index of the response configuration it matched, so the embedded
-// server knows what to serve. From the outside, the effect is the same as
-// a short-circuiting middleware: the real backend is never contacted.
+// built-in "headers" middleware is used to tag each request with the index of the response
+// configuration it matched, so the embedded server knows what to serve.
 type Provider struct {
 	name      string
 	responses []ResponseConfig
@@ -171,7 +166,7 @@ func (p *Provider) Init() error {
 }
 
 // Provide creates and sends the dynamic configuration, and starts the
-// embedded HTTP server that serves the static responses.
+// embedded HTTP server that serves the responses.
 func (p *Provider) Provide(cfgChan chan<- json.Marshaler) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	p.cancel = cancel
@@ -189,14 +184,14 @@ func (p *Provider) Provide(cfgChan chan<- json.Marshaler) error {
 
 	go func() {
 		if serveErr := p.server.Serve(listener); serveErr != nil && serveErr != http.ErrServerClosed {
-			fmt.Fprintf(os.Stderr, "static-response-provider: server error: %v\n", serveErr)
+			fmt.Fprintf(os.Stderr, "responder: server error: %v\n", serveErr)
 		}
 	}()
 
 	go func() {
 		defer func() {
 			if rec := recover(); rec != nil {
-				fmt.Fprintf(os.Stderr, "static-response-provider: panic: %v\n", rec)
+				fmt.Fprintf(os.Stderr, "responder: panic: %v\n", rec)
 			}
 		}()
 
@@ -238,7 +233,7 @@ func (p *Provider) serveResponse(w http.ResponseWriter, r *http.Request) {
 	if resp.File != "" {
 		content, readErr := os.ReadFile(resp.File)
 		if readErr != nil {
-			fmt.Fprintf(os.Stderr, "static-response-provider: failed to read file %q: %v\n", resp.File, readErr)
+			fmt.Fprintf(os.Stderr, "responder: failed to read file %q: %v\n", resp.File, readErr)
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
@@ -281,7 +276,7 @@ func (p *Provider) generateConfiguration() *dynamic.Configuration {
 		},
 	}
 
-	const serviceName = "static-response-service"
+	const serviceName = "responder-service"
 
 	configuration.HTTP.Services[serviceName] = &dynamic.Service{
 		LoadBalancer: &dynamic.ServersLoadBalancer{
@@ -293,8 +288,8 @@ func (p *Provider) generateConfiguration() *dynamic.Configuration {
 	}
 
 	for i, resp := range p.responses {
-		routerName := fmt.Sprintf("static-response-router-%d", i)
-		middlewareName := fmt.Sprintf("static-response-headers-%d", i)
+		routerName := fmt.Sprintf("responder-router-%d", i)
+		middlewareName := fmt.Sprintf("responder-headers-%d", i)
 
 		configuration.HTTP.Middlewares[middlewareName] = &dynamic.Middleware{
 			Headers: &dynamic.Headers{

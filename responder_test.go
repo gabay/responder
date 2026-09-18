@@ -1,4 +1,4 @@
-package static_response_provider_test
+package responder_test
 
 import (
 	"context"
@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"testing"
 
-	staticresponseprovider "github.com/gabay/static-response-provider"
+	responder "github.com/gabay/responder"
 )
 
 const (
@@ -20,10 +20,10 @@ const (
 	testDefaultHeaderY = "yes"
 )
 
-func newProvider(t *testing.T, config *staticresponseprovider.Config) *staticresponseprovider.Provider {
+func newProvider(t *testing.T, config *responder.Config) *responder.Provider {
 	t.Helper()
 
-	provider, err := staticresponseprovider.New(context.Background(), config, "test")
+	provider, err := responder.New(context.Background(), config, "test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -32,7 +32,7 @@ func newProvider(t *testing.T, config *staticresponseprovider.Config) *staticres
 }
 
 func TestInit_RequiresAtLeastOneResponse(t *testing.T) {
-	provider := newProvider(t, &staticresponseprovider.Config{})
+	provider := newProvider(t, &responder.Config{})
 
 	if err := provider.Init(); err == nil {
 		t.Fatal("expected an error, got nil")
@@ -40,8 +40,8 @@ func TestInit_RequiresAtLeastOneResponse(t *testing.T) {
 }
 
 func TestInit_RequiresRule(t *testing.T) {
-	provider := newProvider(t, &staticresponseprovider.Config{
-		Responses: []staticresponseprovider.ResponseConfig{
+	provider := newProvider(t, &responder.Config{
+		Responses: []responder.ResponseConfig{
 			{Body: testBodyOK},
 		},
 	})
@@ -52,8 +52,8 @@ func TestInit_RequiresRule(t *testing.T) {
 }
 
 func TestInit_RejectsBodyAndFileTogether(t *testing.T) {
-	provider := newProvider(t, &staticresponseprovider.Config{
-		Responses: []staticresponseprovider.ResponseConfig{
+	provider := newProvider(t, &responder.Config{
+		Responses: []responder.ResponseConfig{
 			{Rule: testRuleExample, Body: testBodyOK, File: "response.txt"},
 		},
 	})
@@ -65,7 +65,7 @@ func TestInit_RejectsBodyAndFileTogether(t *testing.T) {
 
 // provideConfig starts the provider and returns its generated dynamic
 // configuration as a generic map, along with a cleanup func that stops it.
-func provideConfig(t *testing.T, provider *staticresponseprovider.Provider) map[string]any {
+func provideConfig(t *testing.T, provider *responder.Provider) map[string]any {
 	t.Helper()
 
 	if err := provider.Init(); err != nil {
@@ -100,8 +100,8 @@ func provideConfig(t *testing.T, provider *staticresponseprovider.Provider) map[
 }
 
 func TestProvide_GeneratesOneServiceAndOneRouterMiddlewarePerResponse(t *testing.T) {
-	provider := newProvider(t, &staticresponseprovider.Config{
-		Responses: []staticresponseprovider.ResponseConfig{
+	provider := newProvider(t, &responder.Config{
+		Responses: []responder.ResponseConfig{
 			{Rule: "Host(`a.example.com`)", Body: "A"},
 			{Rule: "Host(`b.example.com`)", Body: "B"},
 		},
@@ -130,8 +130,8 @@ func TestProvide_GeneratesOneServiceAndOneRouterMiddlewarePerResponse(t *testing
 }
 
 func TestProvide_RouterUsesPriorityAndMiddlewares(t *testing.T) {
-	provider := newProvider(t, &staticresponseprovider.Config{
-		Responses: []staticresponseprovider.ResponseConfig{
+	provider := newProvider(t, &responder.Config{
+		Responses: []responder.ResponseConfig{
 			{
 				Rule:        testRuleExample,
 				Body:        testBodyOK,
@@ -166,13 +166,13 @@ func TestProvide_RouterUsesPriorityAndMiddlewares(t *testing.T) {
 }
 
 func TestProvide_AppliesDefaults(t *testing.T) {
-	provider := newProvider(t, &staticresponseprovider.Config{
+	provider := newProvider(t, &responder.Config{
 		DefaultPriority:    7,
 		DefaultBody:        testDefaultBody,
 		DefaultStatus:      201,
 		DefaultHeaders:     map[string]string{"X-Default": testDefaultHeaderY},
 		DefaultMiddlewares: []string{"default-middleware@file"},
-		Responses: []staticresponseprovider.ResponseConfig{
+		Responses: []responder.ResponseConfig{
 			{Rule: testRuleExample},
 		},
 	})
@@ -218,10 +218,10 @@ func TestProvide_AppliesDefaults(t *testing.T) {
 }
 
 func TestProvide_ResponseOverridesDefaults(t *testing.T) {
-	provider := newProvider(t, &staticresponseprovider.Config{
+	provider := newProvider(t, &responder.Config{
 		DefaultBody:   testDefaultBody,
 		DefaultStatus: 201,
-		Responses: []staticresponseprovider.ResponseConfig{
+		Responses: []responder.ResponseConfig{
 			{Rule: testRuleExample, Body: "overridden body", Status: 202},
 		},
 	})
@@ -246,8 +246,8 @@ func TestProvide_ResponseOverridesDefaults(t *testing.T) {
 }
 
 func TestServeResponse_Body(t *testing.T) {
-	provider := newProvider(t, &staticresponseprovider.Config{
-		Responses: []staticresponseprovider.ResponseConfig{
+	provider := newProvider(t, &responder.Config{
+		Responses: []responder.ResponseConfig{
 			{
 				Rule:   testRuleExample,
 				Body:   "hello from body",
@@ -290,8 +290,8 @@ func TestServeResponse_File(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	provider := newProvider(t, &staticresponseprovider.Config{
-		Responses: []staticresponseprovider.ResponseConfig{
+	provider := newProvider(t, &responder.Config{
+		Responses: []responder.ResponseConfig{
 			{
 				Rule: testRuleExample,
 				File: filePath,
@@ -319,8 +319,8 @@ func TestServeResponse_File(t *testing.T) {
 }
 
 func TestServeResponse_MultipleResponsesShareOneServer(t *testing.T) {
-	provider := newProvider(t, &staticresponseprovider.Config{
-		Responses: []staticresponseprovider.ResponseConfig{
+	provider := newProvider(t, &responder.Config{
+		Responses: []responder.ResponseConfig{
 			{Rule: "Host(`a.example.com`)", Body: "A", Status: 200},
 			{Rule: "Host(`b.example.com`)", Body: "B", Status: 200},
 		},
@@ -350,7 +350,7 @@ func TestServeResponse_MultipleResponsesShareOneServer(t *testing.T) {
 }
 
 // doRequest sends a request directly to the shared embedded server, tagging
-// it with X-Static-Response-Id, exactly like the generated "headers"
+// it with X-Responder-Id, exactly like the generated "headers"
 // middleware would.
 func doRequest(t *testing.T, raw map[string]any, responseIndex int) *http.Response {
 	t.Helper()
@@ -371,7 +371,7 @@ func doRequest(t *testing.T, raw map[string]any, responseIndex int) *http.Respon
 	if err != nil {
 		t.Fatal(err)
 	}
-	req.Header.Set("X-Static-Response-Id", strconv.Itoa(responseIndex))
+	req.Header.Set("X-Responder-Id", strconv.Itoa(responseIndex))
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
